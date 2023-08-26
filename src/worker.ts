@@ -169,6 +169,28 @@ export default {
 				default:
 					return new Response('404 Not Found', { status: 404 });
 			}
+		} else if(req.method === 'DELETE'){
+			switch(url.pathname){
+				case '/api/v1/photos':
+					let filename = url.searchParams.get('photo');
+
+					if(!filename || !filename.match(/VRChat_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}.[0-9]{3}_[0-9]{4}x[0-9]{4}.png/gm))
+						return new Response(JSON.stringify({ ok: false, error: 'Invaild file name' }), { headers: { 'Content-Type': 'application/json' } });
+
+					if(!token)
+						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { headers: { 'Content-Type': 'application/json' } });
+
+					let user = await users.findOne({ token: token });
+					if(!user)
+						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { headers: { 'Content-Type': 'application/json' } });
+
+					await env.BUCKET.delete(env.FILE_PREFIX + user._id + '/' + filename);
+					console.log('Deleted photo of '+user.username+' name '+filename);
+
+					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+				default:
+					return new Response('404 Not Found', { status: 404 });
+			}
 		} else
 			return new Response('404 Not Found', { status: 404 });
 	},
