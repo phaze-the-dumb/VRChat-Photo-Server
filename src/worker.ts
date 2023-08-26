@@ -184,7 +184,13 @@ export default {
 					if(!user)
 						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { headers: { 'Content-Type': 'application/json' } });
 
+					let file = await env.BUCKET.head(env.FILE_PREFIX + user._id + '/' + filename);
+					if(!file)return new Response(JSON.stringify({ ok: false, error: 'File not found' }), { headers: { 'Content-Type': 'application/json' } });
+
+					let fileSize = file.size;
 					await env.BUCKET.delete(env.FILE_PREFIX + user._id + '/' + filename);
+
+					await users.updateOne({ _id: user._id }, { $inc: { used: -fileSize } });
 					console.log('Deleted photo of '+user.username+' name '+filename);
 
 					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
