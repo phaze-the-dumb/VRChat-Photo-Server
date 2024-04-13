@@ -305,6 +305,7 @@ export default {
 					}
 
 					files.objects.forEach(async file => {
+						console.log(file.key);
 						await env.BUCKET.delete(file.key);
 					});
 
