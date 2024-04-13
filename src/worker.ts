@@ -234,6 +234,9 @@ export default {
 					if(!user)
 						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
+					if(!user.settings.enableSync)
+						return new Response(JSON.stringify({ ok: false, error: 'Not enough storage' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
 					if(user.used >= user.storage)
 						return new Response(JSON.stringify({ ok: false, error: 'Not enough storage' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
