@@ -240,6 +240,11 @@ export default {
 					await env.BUCKET.put(env.FILE_PREFIX + user._id + '/' + filename, req.body);
 					let fileSize = (await env.BUCKET.head(env.FILE_PREFIX + user._id + '/' + filename))!.size;
 
+					if(user.used + fileSize >= user.storage){
+						await env.BUCKET.delete(env.FILE_PREFIX + user._id + '/' + filename);
+						return new Response(JSON.stringify({ ok: false, error: 'Not enough storage' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+					}
+
 					await users.updateOne({ _id: user._id }, { $inc: { used: fileSize } });
 					console.log('Uploaded photo to '+user.username+' name '+filename+' size '+fileSize);
 
