@@ -293,6 +293,8 @@ export default {
 					let user1 = await users.findOne({ token: token });
 					if(!user1)
 						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { headers: { 'Content-Type': 'application/json' } });
+					
+					await users.updateOne({ _id: user1._id }, { $set: { used: 0, settings: { enableSync: false } } });
 
 					let files = await env.BUCKET.list({ prefix: env.FILE_PREFIX + user1._id });
 
@@ -311,7 +313,6 @@ export default {
 						await env.BUCKET.delete(file.key);
 					}
 
-					await users.updateOne({ _id: user1._id }, { $set: { used: 0, settings: { enableSync: false } } });
 					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 				default:
 					return new Response('404 Not Found', { status: 404 });
