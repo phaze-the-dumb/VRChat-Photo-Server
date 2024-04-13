@@ -3,6 +3,7 @@ main = "src/worker.ts"
 compatibility_date = "2023-08-14"
 
 [vars]
+APP_ID = "79959294626406"
 FILE_PREFIX = "photos/"
 
 [[r2_buckets]]

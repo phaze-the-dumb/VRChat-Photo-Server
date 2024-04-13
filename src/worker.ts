@@ -34,15 +34,24 @@ export default {
 				case '/api/v1/status':
 					return new Response('{"ok":true}', { headers: { 'Content-Type': 'application/json' } });
 				case '/api/v1/auth':
-					if(!token)return Response.redirect('https://id.phazed.xyz/api/v1/oauth?app='+env.APP_ID);
+					if(url.searchParams.get('denied'))
+						return new Response('<style>body{ background: black; color: white; }</style>Authentication flow finished, you may close this tab now <script>window.location.href = (\'vrcpm://auth-denied/\')</script>', { headers: { 'Content-Type': 'text/html' } });
 
-					let dataReq = await fetch('https://id.phazed.xyz/api/v1/user/@me', { headers: { auth: token, oauth: env.APP_TOKEN } });
+					if(!token)return Response.redirect('https://id.phazed.xyz/?oauth='+env.APP_ID);
+
+					let authReq = await fetch('https://api.phazed.xyz/id/v1/oauth/enable?apptoken='+env.APP_TOKEN+'&sesid='+url.searchParams.get('id'), { method: 'PUT' });
+					let auth: any = await authReq.json();
+
+					if(!auth.ok)
+						return new Response(JSON.stringify(auth), { headers: { 'Content-Type': 'application/json' } });
+
+					let dataReq = await fetch('https://api.phazed.xyz/id/v1/profile/@me?token='+token);
 					let data: any = await dataReq.json();
 
 					if(!data.ok)
 						return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
 
-					let trashReq = await fetch('https://id.phazed.xyz/api/v1/oauth/token', { method: 'DELETE', headers: { auth: token } });
+					let trashReq = await fetch('https://api.phazed.xyz/id/v1/oauth?token='+token, { method: 'DELETE' });
 					let trash: any = await trashReq.json();
 
 					if(!trash.ok)
@@ -50,16 +59,17 @@ export default {
 
 					let userData = await users.findOne({ _id: data.id });
 					if(!userData){
-						let tokenReq = await fetch('https://csprng.xyz/v1/api');
-						let token: any = await tokenReq.json()
-
 						userData = {
 							_id: data.id,
 							username: data.username,
-							avatar: data.avatar,
+							avatar: 'https://cdn.phazed.xyz/id/avatars/' + data.id + '/' + data.avatar + '.png',
 							used: 0,
 							storage: 0,
-							token: token.Data,
+							token: crypto.randomUUID() + crypto.randomUUID() + crypto.randomUUID(),
+							shareCode: Math.floor(Math.random() * 100000000).toString(),
+							shares: [],
+							blocks: [],
+							serverVersion: '1.0',
 							settings: {
 								enableSync: false
 							}
@@ -74,7 +84,7 @@ export default {
 					if(userData.avatar !== data.avatar)
 						await users.updateOne({ _id: data.id }, { $set: { avatar: data.avatar } });
 
-					return Response.redirect('http://127.0.0.1:53413/api/v1/auth/callback?token='+encodeURIComponent(userData.token));
+					return new Response('<style>body{ background: black; color: white; }</style>Authentication flow finished, you may close this tab now <script>window.location.href = (\'vrcpm://auth-callback/'+userData.token+'\')</script>', { headers: { 'Content-Type': 'text/html' } });
 				case '/api/v1/account':
 					if(!token)
 						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { headers: { 'Content-Type': 'application/json' } });
@@ -82,13 +92,20 @@ export default {
 					let user = await users.findOne({ token: token });
 					if(!user)return new Response(JSON.stringify({ ok: false, error: 'Invalid token' }), { headers: { 'Content-Type': 'application/json' } });
 
+					if(!user.shareCode){
+						user.shareCode = Math.floor(Math.random() * 100000000).toString();
+						users.updateOne({ _id: user._id }, { $set: { shareCode: user.shareCode } });
+					}
+
 					let filteredUser: any = {
 						_id: user._id,
 						username: user.username,
 						avatar: user.avatar,
 						used: user.used,
 						storage: user.storage,
-						settings: user.settings
+						settings: user.settings,
+						shareCode: user.shareCode,
+						serverVersion: user.serverVersion
 					}
 
 					return new Response(JSON.stringify({ ok: true, user: filteredUser }), { headers: { 'Content-Type': 'application/json' } });
@@ -123,22 +140,77 @@ export default {
 				case '/api/v1/photos':
 					let photo = url.searchParams.get('photo');
 					if(!photo)
-						return new Response(JSON.stringify({ ok: false, error: 'No photo specified' }), { headers: { 'Content-Type': 'application/json' } });
+						return new Response(JSON.stringify({ ok: false, error: 'No photo specified' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
 					if(!token)
-						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { headers: { 'Content-Type': 'application/json' } });
+						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
 					let targetUser = await users.findOne({ token: token });
-					if(!targetUser)return new Response(JSON.stringify({ ok: false, error: 'Invalid token' }), { headers: { 'Content-Type': 'application/json' } });
+					if(!targetUser)return new Response(JSON.stringify({ ok: false, error: 'Invalid token' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
 					let object = await env.BUCKET.get(env.FILE_PREFIX + targetUser._id + '/' + photo);
-					if(!object)return new Response(JSON.stringify({ ok: false, error: 'Photo doesn\'t exist' }), { headers: { 'Content-Type': 'application/json' } });
+					if(!object)return new Response(JSON.stringify({ ok: false, error: 'Photo doesn\'t exist' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
 
 					let headers = new Headers();
 					object.writeHttpMetadata(headers);
 					headers.set('etag', object.httpEtag);
 
 					return new Response(object.body, { headers });
+				case '/api/v1/user/byCode':
+					if(!token)
+						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					let user2 = await users.findOne({ token: token });
+					if(!user2)return new Response(JSON.stringify({ ok: false, error: 'Invalid token' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					let shareCode = url.searchParams.get('code');
+					if(!shareCode)return new Response(JSON.stringify({ ok: false, error: 'Invalid share code provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					if(shareCode === user2.shareCode)return new Response(JSON.stringify({ ok: false, error: 'Cannot find user' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+					let foundUser = await users.findOne({ shareCode: shareCode });
+					if(!foundUser)return new Response(JSON.stringify({ ok: false, error: 'Cannot find user' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+					if(foundUser.blocks.indexOf(user2._id) !== -1)return new Response(JSON.stringify({ ok: false, error: 'Cannot find user' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+					return new Response(JSON.stringify({ ok: true, user: { _id: foundUser._id, username: foundUser.username, avatar: foundUser.avatar } }), { headers: { 'Content-Type': 'application/json' } });
+				case '/api/v1/share':
+					if(!token)
+						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					let user3 = await users.findOne({ token: token });
+					if(!user3)return new Response(JSON.stringify({ ok: false, error: 'Invalid token' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					let shareCode1 = url.searchParams.get('code');
+					if(!shareCode1)return new Response(JSON.stringify({ ok: false, error: 'Invalid share code provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					let photo1 = url.searchParams.get('photo');
+					if(!photo1)return new Response(JSON.stringify({ ok: false, error: 'Invalid photo provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					if(shareCode1 === user3.shareCode)
+						return new Response(JSON.stringify({ ok: false, error: 'Cannot find user' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+					let photoExists = await env.BUCKET.head(env.FILE_PREFIX + user3._id + '/' + photo1);
+					if(!photoExists)return new Response(JSON.stringify({ ok: false, error: 'Cannot find photo' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+					let foundUser1 = await users.findOne({ shareCode: shareCode1 });
+					if(!foundUser1)return new Response(JSON.stringify({ ok: false, error: 'Cannot find user' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+					if(foundUser1.blocks.indexOf(user3._id) !== -1)
+						return new Response(JSON.stringify({ ok: false, error: 'Cannot find user' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+					if(foundUser1.shares.find(( x: any ) => x.userId === user3._id && x.photo === photo1))
+						return new Response(JSON.stringify({ ok: false, error: 'Photo already shared with this user' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+
+					await users.updateOne({ _id: foundUser1._id }, { $push: { "shares": { userId: user3._id, photo: photo1 } } });
+					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+				case '/api/v1/shares':
+					if(!token)
+						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					let user1 = await users.findOne({ token: token });
+					if(!user1)return new Response(JSON.stringify({ ok: false, error: 'Invalid token' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+
+					return new Response(JSON.stringify({ ok: true, shares: user1.shares }), { headers: { 'Content-Type': 'application/json' } });
 				default:
 					return new Response('404 Not Found', { status: 404 });
 			}
@@ -146,18 +218,24 @@ export default {
 			switch(url.pathname){
 				case '/api/v1/photos':
 					if(req.headers.get('content-type') !== 'image/png')
-						return new Response(JSON.stringify({ ok: false, error: 'Invalid content type' }), { headers: { 'Content-Type': 'application/json' } });
+						return new Response(JSON.stringify({ ok: false, error: 'Invalid content type' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
 					let filename = req.headers.get('filename');
-					if(!filename || !filename.match(/VRChat_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}.[0-9]{3}_[0-9]{4}x[0-9]{4}.png/gm))
-						return new Response(JSON.stringify({ ok: false, error: 'Invaild file name' }), { headers: { 'Content-Type': 'application/json' } });
+					if(!filename ||
+						(!filename.match(/VRChat_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}.[0-9]{3}_[0-9]{4}x[0-9]{4}.png/gm) &&
+						!filename.match(/VRChat_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}.[0-9]{3}_[0-9]{4}x[0-9]{4}_wrld_[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}.png/gm))
+					)
+						return new Response(JSON.stringify({ ok: false, error: 'Invaild file name' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
 					if(!token)
-						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { headers: { 'Content-Type': 'application/json' } });
+						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
 					let user = await users.findOne({ token: token });
 					if(!user)
-						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { headers: { 'Content-Type': 'application/json' } });
+						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+
+					if(user.used >= user.storage)
+						return new Response(JSON.stringify({ ok: false, error: 'Not enough storage' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
 					await env.BUCKET.put(env.FILE_PREFIX + user._id + '/' + filename, req.body);
 					let fileSize = (await env.BUCKET.head(env.FILE_PREFIX + user._id + '/' + filename))!.size;
@@ -174,7 +252,10 @@ export default {
 				case '/api/v1/photos':
 					let filename = url.searchParams.get('photo');
 
-					if(!filename || !filename.match(/VRChat_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}.[0-9]{3}_[0-9]{4}x[0-9]{4}.png/gm))
+					if(!filename ||
+						(!filename.match(/VRChat_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}.[0-9]{3}_[0-9]{4}x[0-9]{4}.png/gm) &&
+						!filename.match(/VRChat_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}.[0-9]{3}_[0-9]{4}x[0-9]{4}_wrld_[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}.png/gm))
+					)
 						return new Response(JSON.stringify({ ok: false, error: 'Invaild file name' }), { headers: { 'Content-Type': 'application/json' } });
 
 					if(!token)
