@@ -308,7 +308,7 @@ export default {
 						await env.BUCKET.delete(file.key);
 					}
 
-					await users.updateOne({ _id: user._id }, { $set: { used: 0 } });
+					await users.updateOne({ _id: user1._id }, { $set: { used: 0 } });
 					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 				default:
 					return new Response('404 Not Found', { status: 404 });
