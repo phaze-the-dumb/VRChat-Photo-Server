@@ -304,11 +304,11 @@ export default {
 						cursor = next.cursor;
 					}
 
-					files.objects.forEach(async file => {
-						console.log(file.key);
+					for(let file of files.objects){
 						await env.BUCKET.delete(file.key);
-					});
+					}
 
+					await users.updateOne({ _id: user._id }, { $set: { used: 0 } });
 					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 				default:
 					return new Response('404 Not Found', { status: 404 });
