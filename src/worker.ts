@@ -237,6 +237,9 @@ export default {
 					if(user.used >= user.storage)
 						return new Response(JSON.stringify({ ok: false, error: 'Not enough storage' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
+					let file = await env.BUCKET.head(env.FILE_PREFIX + user._id + '/' + filename);
+					if(file)return new Response(JSON.stringify({ ok: true, error: 'File already exists' }), { headers: { 'Content-Type': 'application/json' } });
+
 					await env.BUCKET.put(env.FILE_PREFIX + user._id + '/' + filename, req.body);
 					let fileSize = (await env.BUCKET.head(env.FILE_PREFIX + user._id + '/' + filename))!.size;
 
