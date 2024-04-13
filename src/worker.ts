@@ -283,6 +283,32 @@ export default {
 					console.log('Deleted photo of '+user.username+' name '+filename);
 
 					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
+				case '/api/v1/allphotos':
+					if(!token)
+						return new Response(JSON.stringify({ ok: false, error: 'No token provided' }), { headers: { 'Content-Type': 'application/json' } });
+
+					let user1 = await users.findOne({ token: token });
+					if(!user1)
+						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { headers: { 'Content-Type': 'application/json' } });
+
+					let files = await env.BUCKET.list({ prefix: env.FILE_PREFIX + user1._id });
+
+					let truncated = files.truncated;
+					let cursor = truncated ? files.cursor : undefined;
+
+					while(truncated){
+						let next = await env.BUCKET.list({ prefix: env.FILE_PREFIX + user1._id, cursor: cursor });
+						files.objects.push(...next.objects);
+
+						truncated = next.truncated;
+						cursor = next.cursor;
+					}
+
+					files.objects.forEach(async file => {
+						await env.BUCKET.delete(file.key);
+					});
+
+					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 				default:
 					return new Response('404 Not Found', { status: 404 });
 			}
