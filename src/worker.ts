@@ -11,6 +11,8 @@ export interface Env {
 	APP_TOKEN: string;
 	FILE_PREFIX: string;
 
+	UPDATE_KEY: string;
+
 	BUCKET: R2Bucket;
 }
 
@@ -31,6 +33,20 @@ export default {
 
 		if(req.method === 'GET'){
 			switch(url.pathname){
+				case '/api/v1/updateProfile':
+					if(url.searchParams.get('key') !== env.UPDATE_KEY)
+						return new Response('404 Not Found', { status: 404 });
+
+					switch(req.headers.get("update-type")){
+						case 'avatar':
+							await users.updateOne({ _id: req.headers.get("user") }, { $set: { avatar: req.headers.get("value") } });
+							break;
+						case 'username':
+							await users.updateOne({ _id: req.headers.get("user") }, { $set: { username: req.headers.get("value") } });
+							break;
+					}
+
+					return new Response(JSON.stringify({ ok: true }), { headers: { 'Content-Type': 'application/json' } });
 				case '/api/v1/status':
 					return new Response('{"ok":true}', { headers: { 'Content-Type': 'application/json' } });
 				case '/api/v1/auth':
@@ -293,7 +309,7 @@ export default {
 					let user1 = await users.findOne({ token: token });
 					if(!user1)
 						return new Response(JSON.stringify({ ok: false, error: 'User not found' }), { headers: { 'Content-Type': 'application/json' } });
-					
+
 					await users.updateOne({ _id: user1._id }, { $set: { used: 0, settings: { enableSync: false } } });
 
 					let files = await env.BUCKET.list({ prefix: env.FILE_PREFIX + user1._id });
